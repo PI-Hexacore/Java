@@ -10,8 +10,8 @@ public class S3Provider {
 
     public S3Client getS3Client() {
         AwsBasicCredentials awsCreds = AwsBasicCredentials.create(
-                "ASIA3HSRJ576ZUSTCMJ2",
-                "hNyrUQQxJkfwS21U8cYW9g3HBbHYgkiGF97fLBKG"
+                "aws_access_key_id=ASIA3HSRJ576ZUSTCMJ2",
+                "aws_secret_access_key=hNyrUQQxJkfwS21U8cYW9g3HBbHYgkiGF97fLBKG"
         );
 
         return S3Client.builder()
