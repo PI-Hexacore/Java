@@ -16,7 +16,7 @@ import java.time.LocalDateTime;
 public class Main {
 
     public static void main(String[] args) throws IOException {
-        String url = "jdbc:mysql://localhost:3306/hexacore?useSSL=false&serverTimezone=UTC";
+        String url = "jdbc:mysql://172.31.23.38:3306/hexacore?useSSL=false&serverTimezone=UTC";
         String usuario = "root";
         String senha = "142536";
 
@@ -143,7 +143,7 @@ public class Main {
     }
 
     public static void registrarLog(String tabela, String status, int registros, String mensagem) {
-        String url = "jdbc:mysql://localhost:3306/hexacore?useSSL=false&serverTimezone=UTC";
+        String url = "jdbc:mysql://172.31.23.38:3306/hexacore?useSSL=false&serverTimezone=UTC";
         String usuario = "root";
         String senha = "142536";
 
