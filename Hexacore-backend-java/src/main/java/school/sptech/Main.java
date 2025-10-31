@@ -4,10 +4,12 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import software.amazon.awssdk.core.sync.ResponseTransformer;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.sql.*;
 import java.time.LocalDateTime;
 
@@ -18,33 +20,40 @@ public class Main {
         String usuario = "root";
         String senha = "142536";
 
-        String caminhoArquivo = "PastSa1_com_genero.xlsx";
-        String caminhoArquivo2 = "Spotdataset.xlsx";
+        S3Client s3Client = new S3Provider().getS3Client();
+
+        InputStream arquivoS3Top = s3Client.getObject(
+                GetObjectRequest.builder()
+                        .bucket("s3-raw-lab-ismael")
+                        .key("PastSa1_com_genero.xlsx")
+                        .build(),
+                ResponseTransformer.toInputStream()
+        );
+
+        InputStream arquivoS3Youtube = s3Client.getObject(
+                GetObjectRequest.builder()
+                        .bucket("s3-raw-lab-ismael")
+                        .key("Spotdataset.xlsx")
+                        .build(),
+                ResponseTransformer.toInputStream()
+        );
+
+        Workbook workbookTop = new XSSFWorkbook(arquivoS3Top);
+        Workbook workbookYoutube = new XSSFWorkbook(arquivoS3Youtube);
 
         int countSpotifyTop = 0;
-        int countSpotifyYoutube = 0;
-
         String sqlSpotifyTop = """
             INSERT INTO SpotifyTop (nm_titulo, cd_rank, dt_rank, nm_artista, nm_pais, ds_chart, ds_trend, qt_stream, ds_genero)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """;
 
-        String sqlSpotifyYoutube = """
-            INSERT INTO SpotifyYoutube (nm_track, nm_album, tp_album, nm_artista, nm_title, qt_stream)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """;
-
-        // ===== INSERÇÃO SPOTIFY TOP =====
         try (Connection conexao = DriverManager.getConnection(url, usuario, senha);
              PreparedStatement stmt = conexao.prepareStatement(sqlSpotifyTop)) {
 
-            FileInputStream arquivo = new FileInputStream(new File(caminhoArquivo));
-            Workbook workbook = new XSSFWorkbook(arquivo);
-
             conexao.setAutoCommit(false);
-            Sheet sheet = workbook.getSheetAt(0);
+            Sheet sheet = workbookTop.getSheetAt(0);
 
-            for (int i = 1; i <= 1000; i++) {
+            for (int i = 1; i <= sheet.getLastRowNum(); i++) {
                 Row row = sheet.getRow(i);
                 if (row == null) continue;
 
@@ -76,29 +85,27 @@ public class Main {
                 }
             }
 
-            try {
-                stmt.executeBatch();
-                conexao.commit();
-                registrarLog("SpotifyTop", "SUCESSO", countSpotifyTop, null);
-            } catch (SQLException e) {
-                registrarLog("SpotifyTop", "FALHA", countSpotifyTop, e.getMessage());
-            }
+            stmt.executeBatch();
+            conexao.commit();
+            registrarLog("SpotifyTop", "SUCESSO", countSpotifyTop, null);
 
         } catch (SQLException e) {
-            registrarLog("SpotifyTop", "FALHA", 0, e.getMessage());
+            registrarLog("SpotifyTop", "FALHA", countSpotifyTop, e.getMessage());
         }
 
-        // ===== INSERÇÃO SPOTIFY YOUTUBE =====
+        int countSpotifyYoutube = 0;
+        String sqlSpotifyYoutube = """
+            INSERT INTO SpotifyYoutube (nm_track, nm_album, tp_album, nm_artista, nm_title, qt_stream)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """;
+
         try (Connection conexao2 = DriverManager.getConnection(url, usuario, senha);
              PreparedStatement stmt2 = conexao2.prepareStatement(sqlSpotifyYoutube)) {
 
-            FileInputStream arquivo2 = new FileInputStream(new File(caminhoArquivo2));
-            Workbook workbook2 = new XSSFWorkbook(arquivo2);
-
             conexao2.setAutoCommit(false);
-            Sheet sheet2 = workbook2.getSheetAt(0);
+            Sheet sheet2 = workbookYoutube.getSheetAt(0);
 
-            for (int i = 1; i <= 500; i++) {
+            for (int i = 1; i <= sheet2.getLastRowNum(); i++) {
                 Row row = sheet2.getRow(i);
                 if (row == null) continue;
 
@@ -124,33 +131,12 @@ public class Main {
                 }
             }
 
-            try {
-                stmt2.executeBatch();
-                conexao2.commit();
-                registrarLog("SpotifyYoutube", "SUCESSO", countSpotifyYoutube, null);
-            } catch (SQLException e) {
-                registrarLog("SpotifyYoutube", "FALHA", countSpotifyYoutube, e.getMessage());
-            }
+            stmt2.executeBatch();
+            conexao2.commit();
+            registrarLog("SpotifyYoutube", "SUCESSO", countSpotifyYoutube, null);
 
         } catch (SQLException e) {
-            registrarLog("SpotifyYoutube", "FALHA", 0, e.getMessage());
-        }
-
-        DadosTratados dao = new DadosTratados(null, null, null, null, null, null, null, null, null, null, null, null, null, null);
-        try {
-            dao.inserirTodos();
-            registrarLog("DadosTratados", "SUCESSO", dao.buscarDadosTratados().size(), null);
-        } catch (Exception e) {
-            registrarLog("DadosTratados", "FALHA", 0, e.getMessage());
-        }
-
-        try {
-            ArtistaMusica artistaMusica = new ArtistaMusica();
-            artistaMusica.importarArtistasEMusicas();
-            registrarLog("Artista/Musica", "SUCESSO", 0, "Importação de artistas e músicas concluída.");
-        } catch (Exception e) {
-            registrarLog("Artista/Musica", "FALHA", 0, e.getMessage());
-            e.printStackTrace();
+            registrarLog("SpotifyYoutube", "FALHA", countSpotifyYoutube, e.getMessage());
         }
 
         System.out.println("Processo completo de importação finalizado!");
