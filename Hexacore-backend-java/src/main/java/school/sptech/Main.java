@@ -53,7 +53,7 @@ public class Main {
             conexao.setAutoCommit(false);
             Sheet sheet = workbookTop.getSheetAt(0);
 
-            for (int i = 1; i <= sheet.getLastRowNum(); i++) {
+            for (int i = 1; i <= 500; i++) {
                 Row row = sheet.getRow(i);
                 if (row == null) continue;
 
@@ -105,7 +105,7 @@ public class Main {
             conexao2.setAutoCommit(false);
             Sheet sheet2 = workbookYoutube.getSheetAt(0);
 
-            for (int i = 1; i <= sheet2.getLastRowNum(); i++) {
+            for (int i = 1; i <= 500; i++) {
                 Row row = sheet2.getRow(i);
                 if (row == null) continue;
 
