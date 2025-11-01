@@ -25,7 +25,7 @@ public class Main {
         InputStream arquivoS3Top = s3Client.getObject(
                 GetObjectRequest.builder()
                         .bucket("s3-raw-lab-ismael")
-                        .key("PastSa1_com_genero.xlsx")
+                        .key("teste1.xlsx")
                         .build(),
                 ResponseTransformer.toInputStream()
         );
@@ -33,7 +33,7 @@ public class Main {
         InputStream arquivoS3Youtube = s3Client.getObject(
                 GetObjectRequest.builder()
                         .bucket("s3-raw-lab-ismael")
-                        .key("Spotdataset.xlsx")
+                        .key("teste2.xlsx")
                         .build(),
                 ResponseTransformer.toInputStream()
         );
