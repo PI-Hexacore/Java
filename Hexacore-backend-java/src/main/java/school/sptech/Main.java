@@ -8,6 +8,8 @@ import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.sql.*;
@@ -16,13 +18,15 @@ import java.time.LocalDateTime;
 public class Main {
 
     public static void main(String[] args) throws IOException {
-        String url = "jdbc:mysql://localhost:3306/hexacore?allowPublicKeyRetrieval=true&useSSL=false";
+
+        String url = "jdbc:mysql://localhost:3306/hexacore?useSSL=false&serverTimezone=UTC";
         String usuario = "root";
         String senha = "142536";
 
+        // Conexão com S3
         S3Client s3Client = new S3Provider().getS3Client();
 
-        InputStream arquivoS3Top = s3Client.getObject(
+        InputStream arquivoS3 = s3Client.getObject(
                 GetObjectRequest.builder()
                         .bucket("s3-raw-lab-ismael")
                         .key("teste1.xlsx")
@@ -30,7 +34,7 @@ public class Main {
                 ResponseTransformer.toInputStream()
         );
 
-        InputStream arquivoS3Youtube = s3Client.getObject(
+        InputStream arquivoS3_2 = s3Client.getObject(
                 GetObjectRequest.builder()
                         .bucket("s3-raw-lab-ismael")
                         .key("teste2.xlsx")
@@ -38,22 +42,35 @@ public class Main {
                 ResponseTransformer.toInputStream()
         );
 
-        Workbook workbookTop = new XSSFWorkbook(arquivoS3Top);
-        Workbook workbookYoutube = new XSSFWorkbook(arquivoS3Youtube);
+        Workbook workbook = new XSSFWorkbook(arquivoS3);
+        Workbook workbook2 = new XSSFWorkbook(arquivoS3_2);
+
+        String caminhoArquivo2 = "Spotdataset.xlsx";
 
         int countSpotifyTop = 0;
-        String sqlSpotifyTop = """
-            INSERT INTO SpotifyTop (nm_titulo, cd_rank, dt_rank, nm_artista, nm_pais, ds_chart, ds_trend, qt_stream, ds_genero)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """;
+        int countSpotifyYoutube = 0;
 
+        String sqlSpotifyTop = """
+                INSERT INTO SpotifyTop (nm_titulo, cd_rank, dt_rank, nm_artista, nm_pais, ds_chart, ds_trend, qt_stream, ds_genero)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """;
+
+        String sqlSpotifyYoutube = """
+                INSERT INTO SpotifyYoutube (nm_track, nm_album, tp_album, nm_artista, nm_title, qt_stream)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """;
+
+        // ===== INSERÇÃO SPOTIFY TOP =====
         try (Connection conexao = DriverManager.getConnection(url, usuario, senha);
              PreparedStatement stmt = conexao.prepareStatement(sqlSpotifyTop)) {
 
+            FileInputStream arquivo = new FileInputStream(new File(caminhoArquivo2));
+            Workbook workbookTop = new XSSFWorkbook(arquivo);
             conexao.setAutoCommit(false);
+
             Sheet sheet = workbookTop.getSheetAt(0);
 
-            for (int i = 1; i <= 500; i++) {
+            for (int i = 1; i <= 1000; i++) {
                 Row row = sheet.getRow(i);
                 if (row == null) continue;
 
@@ -80,30 +97,33 @@ public class Main {
 
                     stmt.addBatch();
                     countSpotifyTop++;
+
                 } catch (Exception e) {
                     System.err.printf("ERRO na linha Excel %d: %s. Linha ignorada.%n", i + 1, e.getMessage());
                 }
             }
 
-            stmt.executeBatch();
-            conexao.commit();
-            registrarLog("SpotifyTop", "SUCESSO", countSpotifyTop, null);
+            try {
+                stmt.executeBatch();
+                conexao.commit();
+                registrarLog("SpotifyTop", "SUCESSO", countSpotifyTop, null);
+            } catch (SQLException e) {
+                registrarLog("SpotifyTop", "FALHA", countSpotifyTop, e.getMessage());
+            }
 
         } catch (SQLException e) {
-            registrarLog("SpotifyTop", "FALHA", countSpotifyTop, e.getMessage());
+            registrarLog("SpotifyTop", "FALHA", 0, e.getMessage());
         }
 
-        int countSpotifyYoutube = 0;
-        String sqlSpotifyYoutube = """
-            INSERT INTO SpotifyYoutube (nm_track, nm_album, tp_album, nm_artista, nm_title, qt_stream)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """;
-
+        // ===== INSERÇÃO SPOTIFY YOUTUBE =====
         try (Connection conexao2 = DriverManager.getConnection(url, usuario, senha);
              PreparedStatement stmt2 = conexao2.prepareStatement(sqlSpotifyYoutube)) {
 
+            FileInputStream arquivo2 = new FileInputStream(new File(caminhoArquivo2));
+            Workbook workbookYT = new XSSFWorkbook(arquivo2);
             conexao2.setAutoCommit(false);
-            Sheet sheet2 = workbookYoutube.getSheetAt(0);
+
+            Sheet sheet2 = workbookYT.getSheetAt(0);
 
             for (int i = 1; i <= 500; i++) {
                 Row row = sheet2.getRow(i);
@@ -126,17 +146,42 @@ public class Main {
 
                     stmt2.addBatch();
                     countSpotifyYoutube++;
+
                 } catch (Exception e) {
                     System.err.printf("ERRO na linha Excel %d: %s. Linha ignorada.%n", i + 1, e.getMessage());
                 }
             }
 
-            stmt2.executeBatch();
-            conexao2.commit();
-            registrarLog("SpotifyYoutube", "SUCESSO", countSpotifyYoutube, null);
+            try {
+                stmt2.executeBatch();
+                conexao2.commit();
+                registrarLog("SpotifyYoutube", "SUCESSO", countSpotifyYoutube, null);
+            } catch (SQLException e) {
+                registrarLog("SpotifyYoutube", "FALHA", countSpotifyYoutube, e.getMessage());
+            }
 
         } catch (SQLException e) {
-            registrarLog("SpotifyYoutube", "FALHA", countSpotifyYoutube, e.getMessage());
+            registrarLog("SpotifyYoutube", "FALHA", 0, e.getMessage());
+        }
+
+        // ===== DADOS TRATADOS =====
+        DadosTratados dao = new DadosTratados(null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+
+        try {
+            dao.inserirTodos();
+            registrarLog("DadosTratados", "SUCESSO", dao.buscarDadosTratados().size(), null);
+        } catch (Exception e) {
+            registrarLog("DadosTratados", "FALHA", 0, e.getMessage());
+        }
+
+        // ===== ARTISTA / MÚSICA =====
+        try {
+            ArtistaMusica artistaMusica = new ArtistaMusica();
+            artistaMusica.importarArtistasEMusicas();
+            registrarLog("Artista/Musica", "SUCESSO", 0, "Importação de artistas e músicas concluída.");
+        } catch (Exception e) {
+            registrarLog("Artista/Musica", "FALHA", 0, e.getMessage());
+            e.printStackTrace();
         }
 
         System.out.println("Processo completo de importação finalizado!");
@@ -146,7 +191,6 @@ public class Main {
         String url = "jdbc:mysql://localhost:3306/hexacore?useSSL=false&serverTimezone=UTC";
         String usuario = "root";
         String senha = "142536";
-
         String sql = "INSERT INTO LogImportacao (tabelaAlvo, statusLog, registrosInseridos, mensagem) VALUES (?, ?, ?, ?)";
 
         try (Connection conexao = DriverManager.getConnection(url, usuario, senha);
@@ -156,7 +200,6 @@ public class Main {
             stmt.setString(2, status);
             stmt.setInt(3, registros);
             stmt.setString(4, mensagem);
-
             stmt.executeUpdate();
 
         } catch (SQLException e) {
