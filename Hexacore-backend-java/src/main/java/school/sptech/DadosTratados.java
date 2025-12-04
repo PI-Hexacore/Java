@@ -26,7 +26,9 @@ public class DadosTratados {
     private String ds_trend;
     private String genero;
 
-    public DadosTratados(Integer fk_spotify_top, Integer fk_spotify_youtube, String nm_artista, String nm_track, String tp_album, String nm_titulo, Integer qt_stream, String nm_album, Integer cd_rank, LocalDateTime dt_rank, String nm_pais, String ds_chart, String ds_trend, String generos) {
+    public DadosTratados() {}
+
+    public DadosTratados(Integer fk_spotify_top, Integer fk_spotify_youtube, String nm_artista, String nm_track, String tp_album, String nm_titulo, Integer qt_stream, String nm_album, Integer cd_rank, LocalDateTime dt_rank, String nm_pais, String ds_chart, String ds_trend, String genero) {
         this.fk_spotify_top = fk_spotify_top;
         this.fk_spotify_youtube = fk_spotify_youtube;
         this.nm_artista = nm_artista;
@@ -40,63 +42,68 @@ public class DadosTratados {
         this.nm_pais = nm_pais;
         this.ds_chart = ds_chart;
         this.ds_trend = ds_trend;
-        this.genero = generos;
+        this.genero = genero;
     }
+
+    // ------------------ MÉTODOS PRINCIPAIS ------------------
 
     public List<DadosTratados> buscarDadosTratados() {
         List<DadosTratados> lista = new ArrayList<>();
 
         String sql = """
-    SELECT
-        st.id_spotify_top,
-        sy.id_spotify_youtube,
-        st.nm_titulo AS titulo_spotify,
-        sy.nm_track AS track_youtube,
-        st.nm_artista AS artista_spotify,
-        sy.nm_artista AS artista_youtube,
-        st.qt_stream AS streams_spotify,
-        sy.qt_stream AS streams_youtube,
-        st.nm_pais AS pais,
-        sy.nm_album AS album,
-        sy.tp_album AS tipo_album,
-        st.cd_rank AS `rank`,
-        st.ds_genero AS genero,
-        st.dt_rank AS data_rank,
-        st.ds_chart AS chart,
-        st.ds_trend AS trend
-    FROM SpotifyTop st
-    JOIN SpotifyYoutube sy
-        ON (
-            st.nm_artista = sy.nm_artista
-            OR st.nm_titulo = sy.nm_track
-            OR st.nm_titulo = sy.nm_title
-        );
-""";
-
+            SELECT
+                st.id_spotify_top,
+                sy.id_spotify_youtube,
+                COALESCE(st.nm_artista, sy.nm_artista) AS artista,
+                COALESCE(sy.nm_track, st.nm_titulo) AS track,
+                sy.tp_album AS tipo_album,
+                st.nm_titulo AS titulo_spotify,
+                st.qt_stream AS streams_spotify,
+                sy.qt_stream AS streams_youtube,
+                sy.nm_album AS album,
+                st.cd_rank AS `rank`,
+                st.dt_rank AS data_rank,
+                st.nm_pais AS pais,
+                st.ds_chart AS chart,
+                st.ds_trend AS trend,
+                st.ds_genero AS genero
+            FROM SpotifyTopRaw st
+            JOIN SpotifyYoutubeRaw sy
+                ON st.nm_artista = sy.nm_artista
+                OR st.nm_titulo = sy.nm_track
+                OR st.nm_titulo = sy.nm_title;
+        """;
 
         try (Connection conexao = DriverManager.getConnection(URL, USER, PASSWORD);
              PreparedStatement stmt = conexao.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
 
             while (rs.next()) {
-                DadosTratados dado = new DadosTratados(
-                        rs.getInt("id_spotify_top"),
-                        rs.getInt("id_spotify_youtube"),
-                        rs.getString("artista_spotify"),
-                        rs.getString("track_youtube"),
-                        rs.getString("tipo_album"),
-                        rs.getString("titulo_spotify"),
-                        somarStreams(rs.getInt("streams_spotify"), rs.getInt("streams_spotify")),
-                        rs.getString("album"),
-                        rs.getInt("rank"),
-                        rs.getTimestamp("data_rank") != null ? rs.getTimestamp("data_rank").toLocalDateTime() : null,
-                        rs.getString("pais"),
-                        rs.getString("chart"),
-                        rs.getString("trend"),
-                        rs.getString("genero")
-                );
 
-                lista.add(dado);
+                DadosTratados d = new DadosTratados();
+
+                d.setFk_spotify_top(rs.getInt("id_spotify_top"));
+                d.setFk_spotify_youtube(rs.getInt("id_spotify_youtube"));
+                d.setNm_artista(rs.getString("artista"));
+                d.setNm_track(rs.getString("track"));
+                d.setTp_album(rs.getString("tipo_album"));
+                d.setNm_titulo(rs.getString("titulo_spotify"));
+
+                d.setQt_stream(somarStreams(
+                        rs.getInt("streams_spotify"),
+                        rs.getInt("streams_youtube")
+                ));
+
+                d.setNm_album(rs.getString("album"));
+                d.setCd_rank(rs.getInt("rank"));
+                d.setDt_rank(rs.getTimestamp("data_rank") != null ?
+                        rs.getTimestamp("data_rank").toLocalDateTime() : null);
+                d.setNm_pais(rs.getString("pais"));
+                d.setDs_chart(rs.getString("chart"));
+                d.setDs_trend(rs.getString("trend"));
+                d.setGenero(rs.getString("genero"));
+
+                lista.add(d);
             }
 
         } catch (SQLException e) {
@@ -107,17 +114,18 @@ public class DadosTratados {
     }
 
     private Integer somarStreams(Integer a, Integer b) {
-        if (a == null) a = 0;
-        if (b == null) b = 0;
-        return a + b;
+        return (a == null ? 0 : a) + (b == null ? 0 : b);
     }
+
+
+    // ------------------ INSERIR DADOS TRATADOS ------------------
 
     public void inserirTodos() {
         List<DadosTratados> lista = buscarDadosTratados();
 
         String insertSql = """
-            INSERT INTO DadosTratados 
-            (fk_spotify_top, fk_spotify_youtube, nm_artista, nm_track, tp_album, nm_titulo, 
+            INSERT INTO DadosTratadosTrusted 
+            (fk_spotify_top, fk_spotify_youtube, nm_artista, nm_track, tp_album, nm_titulo,
              qt_stream, nm_album, cd_rank, dt_rank, nm_pais, ds_chart, ds_trend, ds_genero)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """;
@@ -128,6 +136,7 @@ public class DadosTratados {
             int count = 0;
 
             for (DadosTratados d : lista) {
+
                 stmt.setInt(1, d.getFk_spotify_top());
                 stmt.setInt(2, d.getFk_spotify_youtube());
                 stmt.setString(3, d.getNm_artista());
@@ -137,135 +146,74 @@ public class DadosTratados {
                 stmt.setInt(7, d.getQt_stream());
                 stmt.setString(8, d.getNm_album());
                 stmt.setInt(9, d.getCd_rank());
-                stmt.setTimestamp(10, Timestamp.valueOf(d.getDt_rank()));
+
+                if (d.getDt_rank() != null) {
+                    stmt.setTimestamp(10, Timestamp.valueOf(d.getDt_rank()));
+                } else {
+                    stmt.setNull(10, Types.TIMESTAMP);
+                }
+
                 stmt.setString(11, d.getNm_pais());
                 stmt.setString(12, d.getDs_chart());
                 stmt.setString(13, d.getDs_trend());
                 stmt.setString(14, d.getGenero());
+
                 stmt.addBatch();
                 count++;
-                if (count % 100 == 0) {
-                    stmt.executeBatch();
-                }
+
+                if (count % 100 == 0) stmt.executeBatch();
             }
 
             stmt.executeBatch();
-            System.out.println(" Inserido com sucesso! " + count + " registros adicionados.");
+
+            System.out.println("✔ Inserido com sucesso: " + count + " registros em DadosTratados");
 
         } catch (SQLException e) {
             e.printStackTrace();
         }
     }
 
-    public Integer getFk_spotify_top() {
-        return fk_spotify_top;
-    }
+    // ------------------ GETTERS E SETTERS ------------------
 
-    public void setFk_spotify_top(Integer fk_spotify_top) {
-        this.fk_spotify_top = fk_spotify_top;
-    }
+    public Integer getFk_spotify_top() { return fk_spotify_top; }
+    public void setFk_spotify_top(Integer fk_spotify_top) { this.fk_spotify_top = fk_spotify_top; }
 
-    public Integer getFk_spotify_youtube() {
-        return fk_spotify_youtube;
-    }
+    public Integer getFk_spotify_youtube() { return fk_spotify_youtube; }
+    public void setFk_spotify_youtube(Integer fk_spotify_youtube) { this.fk_spotify_youtube = fk_spotify_youtube; }
 
-    public void setFk_spotify_youtube(Integer fk_spotify_youtube) {
-        this.fk_spotify_youtube = fk_spotify_youtube;
-    }
+    public String getNm_artista() { return nm_artista; }
+    public void setNm_artista(String nm_artista) { this.nm_artista = nm_artista; }
 
-    public String getNm_artista() {
-        return nm_artista;
-    }
+    public String getNm_track() { return nm_track; }
+    public void setNm_track(String nm_track) { this.nm_track = nm_track; }
 
-    public void setNm_artista(String nm_artista) {
-        this.nm_artista = nm_artista;
-    }
+    public String getTp_album() { return tp_album; }
+    public void setTp_album(String tp_album) { this.tp_album = tp_album; }
 
-    public String getNm_track() {
-        return nm_track;
-    }
+    public String getNm_titulo() { return nm_titulo; }
+    public void setNm_titulo(String nm_titulo) { this.nm_titulo = nm_titulo; }
 
-    public void setNm_track(String nm_track) {
-        this.nm_track = nm_track;
-    }
+    public Integer getQt_stream() { return qt_stream; }
+    public void setQt_stream(Integer qt_stream) { this.qt_stream = qt_stream; }
 
-    public String getTp_album() {
-        return tp_album;
-    }
+    public String getNm_album() { return nm_album; }
+    public void setNm_album(String nm_album) { this.nm_album = nm_album; }
 
-    public void setTp_album(String tp_album) {
-        this.tp_album = tp_album;
-    }
+    public Integer getCd_rank() { return cd_rank; }
+    public void setCd_rank(Integer cd_rank) { this.cd_rank = cd_rank; }
 
-    public String getNm_titulo() {
-        return nm_titulo;
-    }
+    public LocalDateTime getDt_rank() { return dt_rank; }
+    public void setDt_rank(LocalDateTime dt_rank) { this.dt_rank = dt_rank; }
 
-    public void setNm_titulo(String nm_titulo) {
-        this.nm_titulo = nm_titulo;
-    }
+    public String getNm_pais() { return nm_pais; }
+    public void setNm_pais(String nm_pais) { this.nm_pais = nm_pais; }
 
-    public Integer getQt_stream() {
-        return qt_stream;
-    }
+    public String getDs_chart() { return ds_chart; }
+    public void setDs_chart(String ds_chart) { this.ds_chart = ds_chart; }
 
-    public void setQt_stream(Integer qt_stream) {
-        this.qt_stream = qt_stream;
-    }
+    public String getDs_trend() { return ds_trend; }
+    public void setDs_trend(String ds_trend) { this.ds_trend = ds_trend; }
 
-    public String getNm_album() {
-        return nm_album;
-    }
-
-    public void setNm_album(String nm_album) {
-        this.nm_album = nm_album;
-    }
-
-    public Integer getCd_rank() {
-        return cd_rank;
-    }
-
-    public void setCd_rank(Integer cd_rank) {
-        this.cd_rank = cd_rank;
-    }
-
-    public LocalDateTime getDt_rank() {
-        return dt_rank;
-    }
-
-    public void setDt_rank(LocalDateTime dt_rank) {
-        this.dt_rank = dt_rank;
-    }
-
-    public String getNm_pais() {
-        return nm_pais;
-    }
-
-    public void setNm_pais(String nm_pais) {
-        this.nm_pais = nm_pais;
-    }
-
-    public String getDs_chart() {
-        return ds_chart;
-    }
-
-    public void setDs_chart(String ds_chart) {
-        this.ds_chart = ds_chart;
-    }
-
-    public String getDs_trend() {
-        return ds_trend;
-    }
-
-    public void setDs_trend(String ds_trend) {
-        this.ds_trend = ds_trend;
-    }
-
-    public String getGenero() {
-        return genero;
-    }
-
-    public void setGenero(String genero) {
-        this.genero = genero;
-    }
+    public String getGenero() { return genero; }
+    public void setGenero(String genero) { this.genero = genero; }
 }

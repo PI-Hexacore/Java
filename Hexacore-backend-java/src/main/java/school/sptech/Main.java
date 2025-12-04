@@ -1,187 +1,137 @@
 package school.sptech;
 
-import org.apache.poi.ss.usermodel.Row;
-import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.sql.*;
-import java.time.LocalDateTime;
 
 public class Main {
 
-    public static void main(String[] args) throws IOException {
-        String url = "jdbc:mysql://localhost:3306/hexacore?allowPublicKeyRetrieval=true&useSSL=false";
-        String usuario = "root";
-        String senha = "142536";
+    private static final String URL = "jdbc:mysql://localhost:3306/hexacore?allowPublicKeyRetrieval=true&useSSL=false";
+    private static final String USER = "root";
+    private static final String PASSWORD = "142536";
+
+    public static void main(String[] args) {
+
+        int idUsuario = buscarUsuarioAtivo();
+        if (idUsuario == -1) {
+            System.err.println("Nenhum usuário ativo encontrado para Slack.");
+            return;
+        }
 
         S3Client s3Client = new S3Provider().getS3Client();
 
-        InputStream arquivoS3Top = s3Client.getObject(
-                GetObjectRequest.builder()
-                        .bucket("s3-raw-lab-ismael")
-                        .key("teste1.xlsx")
-                        .build(),
-                ResponseTransformer.toInputStream()
-        );
+        String bucket = "s3-raw-lab-ismael";
+        String keyTop = "teste3.xlsx";
+        String keyYoutube = "teste4.xlsx";
 
-        InputStream arquivoS3Youtube = s3Client.getObject(
-                GetObjectRequest.builder()
-                        .bucket("s3-raw-lab-ismael")
-                        .key("teste2.xlsx")
-                        .build(),
-                ResponseTransformer.toInputStream()
-        );
+        try (
+                InputStream inTop = s3Client.getObject(
+                        GetObjectRequest.builder().bucket(bucket).key(keyTop).build(),
+                        ResponseTransformer.toInputStream()
+                );
 
-        Workbook workbookTop = new XSSFWorkbook(arquivoS3Top);
-        Workbook workbookYoutube = new XSSFWorkbook(arquivoS3Youtube);
+                InputStream inYoutube = s3Client.getObject(
+                        GetObjectRequest.builder().bucket(bucket).key(keyYoutube).build(),
+                        ResponseTransformer.toInputStream()
+                );
 
-        int countSpotifyTop = 0;
-        String sqlSpotifyTop = """
-            INSERT INTO SpotifyTop (nm_titulo, cd_rank, dt_rank, nm_artista, nm_pais, ds_chart, ds_trend, qt_stream, ds_genero)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """;
+                Workbook workbookTop = new XSSFWorkbook(inTop);
+                Workbook workbookYoutube = new XSSFWorkbook(inYoutube)
+        ) {
+            Importador[] importadores = {
+                    new ImportadorSpotifyTop(workbookTop),
+                    new ImportadorSpotifyYoutube(workbookYoutube)
+            };
 
-        try (Connection conexao = DriverManager.getConnection(url, usuario, senha);
-             PreparedStatement stmt = conexao.prepareStatement(sqlSpotifyTop)) {
-
-            conexao.setAutoCommit(false);
-            Sheet sheet = workbookTop.getSheetAt(0);
-
-            for (int i = 1; i <= sheet.getLastRowNum(); i++) {
-                Row row = sheet.getRow(i);
-                if (row == null) continue;
-
+            for (Importador importador : importadores) {
                 try {
-                    String nomeTitulo = row.getCell(0).getStringCellValue();
-                    Integer cdRank = (int) row.getCell(1).getNumericCellValue();
-                    LocalDateTime dtRank = row.getCell(2).getLocalDateTimeCellValue();
-                    String nomeArtista = row.getCell(3).getStringCellValue();
-                    String nomePais = row.getCell(5).getStringCellValue();
-                    String dsChart = row.getCell(6).getStringCellValue();
-                    String dsTrend = row.getCell(7).getStringCellValue();
-                    Integer qtStream = (int) row.getCell(8).getNumericCellValue();
-                    String genero = row.getCell(9).getStringCellValue();
-
-                    stmt.setString(1, nomeTitulo);
-                    stmt.setInt(2, cdRank);
-                    stmt.setObject(3, dtRank);
-                    stmt.setString(4, nomeArtista);
-                    stmt.setString(5, nomePais);
-                    stmt.setString(6, dsChart);
-                    stmt.setString(7, dsTrend);
-                    stmt.setInt(8, qtStream);
-                    stmt.setString(9, genero);
-
-                    stmt.addBatch();
-                    countSpotifyTop++;
+                    importador.importar();
                 } catch (Exception e) {
-                    System.err.printf("ERRO na linha Excel %d: %s. Linha ignorada.%n", i + 1, e.getMessage());
+                    String nome = importador.getClass().getSimpleName();
+                    registrarLog(nome, "FALHA", 0, e.getMessage());
                 }
             }
 
-            stmt.executeBatch();
-            conexao.commit();
-            registrarLog("SpotifyTop", "SUCESSO", countSpotifyTop, null);
-
-        } catch (SQLException e) {
-            registrarLog("SpotifyTop", "FALHA", countSpotifyTop, e.getMessage());
+        } catch (Exception e) {
+            registrarLog("S3/Workbook", "FALHA", 0, e.getMessage());
         }
 
-        int countSpotifyYoutube = 0;
-        String sqlSpotifyYoutube = """
-            INSERT INTO SpotifyYoutube (nm_track, nm_album, tp_album, nm_artista, nm_title, qt_stream)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """;
+        try {
+            DadosTratados dao = new DadosTratados();
+            dao.inserirTodos();
+            int qtd = dao.buscarDadosTratados().size();
+            registrarLog("DadosTratados", "SUCESSO", qtd, null);
+        } catch (Exception e) {
+            registrarLog("DadosTratados", "FALHA", 0, e.getMessage());
+        }
 
-        try (Connection conexao2 = DriverManager.getConnection(url, usuario, senha);
-             PreparedStatement stmt2 = conexao2.prepareStatement(sqlSpotifyYoutube)) {
+        // IMPORTA ARTISTAS + MÚSICAS → só aqui notificamos o cliente
+        try {
+            ImportadorArtistaMusica importadorArtistaMusica = new ImportadorArtistaMusica();
+            importadorArtistaMusica.importar();
 
-            conexao2.setAutoCommit(false);
-            Sheet sheet2 = workbookYoutube.getSheetAt(0);
+            registrarLog("Artista/Musica", "SUCESSO", 0, "Importação concluída.");
 
-            for (int i = 1; i <= sheet2.getLastRowNum(); i++) {
-                Row row = sheet2.getRow(i);
-                if (row == null) continue;
-
-                try {
-                    String nomeTitulo = row.getCell(3).getStringCellValue();
-                    String nomeAlbum = row.getCell(4).getStringCellValue();
-                    String tipoAlbum = row.getCell(5).getStringCellValue();
-                    String nomeArtista = row.getCell(1).getStringCellValue();
-                    String nomeYoutube = row.getCell(19).getStringCellValue();
-                    Integer qtStream = row.getCell(27) == null ? 0 : (int) row.getCell(27).getNumericCellValue();
-
-                    stmt2.setString(1, nomeTitulo);
-                    stmt2.setString(2, nomeAlbum);
-                    stmt2.setString(3, tipoAlbum);
-                    stmt2.setString(4, nomeArtista);
-                    stmt2.setString(5, nomeYoutube);
-                    stmt2.setInt(6, qtStream);
-
-                    stmt2.addBatch();
-                    countSpotifyYoutube++;
-                } catch (Exception e) {
-                    System.err.printf("ERRO na linha Excel %d: %s. Linha ignorada.%n", i + 1, e.getMessage());
-                }
+            if (importadorArtistaMusica.getCountMusicas() > 0 || importadorArtistaMusica.getCountArtistas() > 0) {
+                Slack slack = new Slack(idUsuario);
+                slack.enviarNotificacaoFinal(importadorArtistaMusica.getCountArtistas(),
+                        importadorArtistaMusica.getCountMusicas());
             }
 
-            stmt2.executeBatch();
-            conexao2.commit();
-            registrarLog("SpotifyYoutube", "SUCESSO", countSpotifyYoutube, null);
-
-        } catch (SQLException e) {
-            registrarLog("SpotifyYoutube", "FALHA", countSpotifyYoutube, e.getMessage());
+        } catch (Exception e) {
+            registrarLog("Artista/Musica", "FALHA", 0, e.getMessage());
         }
 
         System.out.println("Processo completo de importação finalizado!");
-
-    DadosTratados dao = new DadosTratados(null, null, null, null, null, null, null, null, null, null, null, null, null, null);
-
-        try {
-        dao.inserirTodos();
-        registrarLog("DadosTratados", "SUCESSO", dao.buscarDadosTratados().size(), null);
-    } catch (Exception e) {
-        registrarLog("DadosTratados", "FALHA", 0, e.getMessage());
     }
 
+    // 🔹 Busca o primeiro usuário ativo no SlackAtivo
+    public static int buscarUsuarioAtivo() {
+        String sql = "SELECT fk_usuario FROM SlackAtivo WHERE notificacoes_desativadas = 0 LIMIT 1";
 
-        try {
-        ArtistaMusica artistaMusica = new ArtistaMusica();
-        artistaMusica.importarArtistasEMusicas();
-        registrarLog("Artista/Musica", "SUCESSO", 0, "Importação de artistas e músicas concluída.");
-    } catch (Exception e) {
-        registrarLog("Artista/Musica", "FALHA", 0, e.getMessage());
-        e.printStackTrace();
+        try (Connection conexao = DriverManager.getConnection(URL, USER, PASSWORD);
+             PreparedStatement stmt = conexao.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+
+            if (rs.next()) {
+                return rs.getInt("fk_usuario");
+            }
+
+        } catch (SQLException e) {
+            System.err.println("Erro ao buscar usuário ativo: " + e.getMessage());
+        }
+        return -1;
     }
-
-        System.out.println("Processo completo de importação finalizado!");
-}
 
     public static void registrarLog(String tabela, String status, int registros, String mensagem) {
-        String url = "jdbc:mysql://localhost:3306/hexacore?allowPublicKeyRetrieval=true&useSSL=false";
-        String usuario = "root";
-        String senha = "142536";
+        String sql = """
+            INSERT INTO LogImportacao (tabela_alvo, id_status, registros_inseridos, mensagem)
+            VALUES (?, ?, ?, ?)
+        """;
 
-        String sql = "INSERT INTO LogImportacao (tabelaAlvo, statusLog, registrosInseridos, mensagem) VALUES (?, ?, ?, ?)";
+        int statusId = switch (status.toUpperCase()) {
+            case "SUCESSO" -> 1;
+            case "PARCIAL" -> 2;
+            case "FALHA" -> 3;
+            default -> 3;
+        };
 
-        try (Connection conexao = DriverManager.getConnection(url, usuario, senha);
+        try (Connection conexao = DriverManager.getConnection(URL, USER, PASSWORD);
              PreparedStatement stmt = conexao.prepareStatement(sql)) {
 
             stmt.setString(1, tabela);
-            stmt.setString(2, status);
+            stmt.setInt(2, statusId);
             stmt.setInt(3, registros);
             stmt.setString(4, mensagem);
 
             stmt.executeUpdate();
 
         } catch (SQLException e) {
-            e.printStackTrace();
             System.err.println("Falha ao registrar log: " + e.getMessage());
         }
     }
