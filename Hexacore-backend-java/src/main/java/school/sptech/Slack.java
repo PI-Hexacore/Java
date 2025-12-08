@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 
 public class Slack {
 
-    private static final String URL_DB = "jdbc:mysql://localhost:3306/hexacore?allowPublicKeyRetrieval=true&useSSL=false";
+    private static final String URL_DB = "jdbc:mysql://44.208.146.218:3306/hexacore?allowPublicKeyRetrieval=true&useSSL=false";
     private static final String USER = "root";
     private static final String PASSWORD = "142536";
 
